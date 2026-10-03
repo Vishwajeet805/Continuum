@@ -1,0 +1,1014 @@
+Done. Ab **Continuum ko actual product ki tarah build karna** start karte hain. Main pehle **PRD + architecture + phased build roadmap** lock kar raha hoon.
+
+# Continuum — Product Requirements Document v1
+
+## 1. Product Goal
+
+Continuum ka goal hai:
+
+> Poor ya intermittent internet me digital service ko fail hone se bachana by finding and completing the **Minimum Viable Transaction (MVT)** — yani user ke task ka smallest safe, dependency-valid part jo current connectivity me complete ho sakta hai.
+
+Main difference:
+
+**Normal system:** full request complete karo ya fail ho jao.
+
+**Continuum:** core intent secure karo, baaki later complete karo.
+
+---
+
+# 2. MVP Use Case
+
+First prototype ke liye ek **Citizen Benefit Application Portal** banayenge.
+
+User ko ek welfare/scholarship-type application fill karni hogi:
+
+- Personal details
+- Eligibility information
+- ID proof
+- Bank proof
+- Photo
+- Supporting document
+
+Ye intentionally generic demo service hogi, kisi actual government portal ka clone nahi.
+
+### Why this use case?
+Because judges instantly samajh sakte hain:
+> weak internet → form submit nahi ho raha → Continuum kya change karta hai.
+
+---
+
+# 3. Basic User Flow
+
+User application open karega:
+
+```text
+Start Application
+      ↓
+Personal Details
+      ↓
+Eligibility
+      ↓
+Documents
+      ↓
+Review
+      ↓
+Submit
+```
+
+Normal app me:
+
+```text
+Submit
+ ↓
+Upload all data
+ ↓
+Network drops
+ ↓
+FAILED
+```
+
+Continuum mode:
+
+```text
+Submit
+ ↓
+Workflow analyzed
+ ↓
+Current connectivity checked
+ ↓
+MVT generated
+ ↓
+Core transaction sent
+ ↓
+Intent acknowledged
+ ↓
+Heavy documents queued
+ ↓
+Automatic completion later
+```
+
+---
+
+# 4. MVP Definition of MVT
+
+First version me MVT fully AI-generated nahi hoga.
+
+Developer workflow configuration define karega.
+
+Example:
+
+```yaml
+workflow: benefit_application
+
+core_fields:
+  - applicant_id
+  - scheme_id
+  - full_name
+  - eligibility_status
+  - created_at
+
+deferred_fields:
+  - profile_photo
+  - id_proof
+  - bank_proof
+  - supporting_document
+```
+
+Core payload maybe:
+
+```json
+{
+  "intent_id": "CNT-94F21",
+  "applicant_id": "USR-123",
+  "scheme_id": "SCH-101",
+  "eligibility_status": true,
+  "created_at": "..."
+}
+```
+
+Ye MVT hoga.
+
+---
+
+# 5. Important Transaction States
+
+Continuum ko state machine ki tarah design karenge.
+
+```text
+DRAFT
+  ↓
+SAVED_LOCAL
+  ↓
+INTENT_SECURED
+  ↓
+MVT_READY
+  ↓
+MVT_SENT
+  ↓
+SERVER_ACKNOWLEDGED
+  ↓
+CORE_COMPLETE
+  ↓
+DEFERRED_PENDING
+  ↓
+FULLY_COMPLETE
+```
+
+Error states:
+
+```text
+RETRY_PENDING
+SYNC_FAILED
+VALIDATION_FAILED
+```
+
+Important:
+
+**Saved Locally != Server Acknowledged**
+
+UI me ye clear dikhna chahiye.
+
+---
+
+# 6. Core Modules
+
+## A. Demo Application
+
+Ye normal end-user application hogi.
+
+Screens:
+
+1. Home
+2. New Application
+3. Personal Details
+4. Eligibility
+5. Documents
+6. Review
+7. Submission Status
+
+---
+
+## B. Workflow Compiler
+
+Responsibility:
+
+Workflow definition ko parse karega.
+
+Determine karega:
+
+- required fields
+- optional fields
+- deferred fields
+- dependencies
+- safe checkpoint
+
+Example:
+
+```text
+Application Creation
+      │
+      ├── Applicant ID [required]
+      ├── Eligibility [required]
+      ├── Timestamp [required]
+      │
+      ├── Photo [deferred]
+      └── Bank Proof [deferred]
+```
+
+---
+
+# 7. Connectivity Engine
+
+Browser ke network conditions estimate karega.
+
+Initial inputs:
+
+- online/offline
+- estimated bandwidth
+- latency
+- recent request success/failure
+- timeout rate
+
+Output:
+
+```json
+{
+  "status": "POOR",
+  "estimatedBandwidthKbps": 20,
+  "stability": 0.42
+}
+```
+
+Modes:
+
+```text
+GOOD
+LIMITED
+POOR
+INTERMITTENT
+OFFLINE
+```
+
+---
+
+# 8. MVT Engine
+
+Ye project ka core hai.
+
+Inputs:
+
+```text
+Workflow
++
+Required dependencies
++
+Payload sizes
++
+Network budget
+```
+
+Output:
+
+```text
+Smallest safe executable transaction
+```
+
+First MVP algorithm simple rakhenge.
+
+Pseudo logic:
+
+```text
+1. Load workflow.
+2. Find required core transaction.
+3. Calculate core payload size.
+4. Estimate network budget.
+5. If core payload fits:
+      create MVT
+   Else:
+      save locally
+6. Mark non-core data as deferred.
+```
+
+Later version me graph optimization add karenge.
+
+---
+
+# 9. Intent Ledger
+
+Har user action ka durable record.
+
+Database structure roughly:
+
+```text
+intent_id
+application_id
+workflow_id
+created_at
+updated_at
+current_state
+core_payload_hash
+server_ack_id
+retry_count
+last_attempt
+```
+
+Example:
+
+```text
+Intent: CNT-A829X
+State: CORE_COMPLETE
+Pending: 3 attachments
+Server acknowledgement: ACK-49211
+```
+
+---
+
+# 10. Duplicate Protection
+
+Very important.
+
+Suppose user network issue ke wajah se 5 baar Submit click kare.
+
+System ko 5 applications create nahi karni.
+
+Har logical action:
+
+```text
+intent_id = CNT-...
+```
+
+Backend:
+
+```text
+if intent_id already exists:
+    return previous result
+```
+
+Yani idempotent API.
+
+---
+
+# 11. Progressive Completion Engine
+
+Core transaction complete hone ke baad:
+
+```text
+Photo         Pending
+ID proof      Pending
+Bank proof    Pending
+PDF           Pending
+```
+
+Connection recover hone par:
+
+```text
+Upload ID proof ✓
+Upload Bank proof ✓
+Upload Photo ✓
+Upload PDF ✓
+```
+
+Then:
+
+```text
+FULLY_COMPLETE
+```
+
+---
+
+# 12. Local Queue
+
+Browser prototype me use karenge:
+
+**IndexedDB**
+
+Structure:
+
+```text
+pending_operations
+
+operation_id
+intent_id
+type
+payload
+priority
+status
+retry_count
+created_at
+```
+
+Example:
+
+```text
+OP-1
+CNT-A829
+UPLOAD_ID_PROOF
+PENDING
+```
+
+---
+
+# 13. Network Simulator — Continuum Lab
+
+Ye prototype ka bahut important component hoga.
+
+Developer panel:
+
+```text
+Network Simulator
+
+[ Fast ]
+[ 3G ]
+[ 2G ]
+[ 20 kbps ]
+[ Intermittent ]
+[ Offline ]
+```
+
+Display:
+
+```text
+Network Status
+20 kbps
+
+Full Transaction
+3.4 MB
+
+MVT
+7 KB
+
+Queued
+4 files
+
+State
+CORE COMPLETE
+```
+
+---
+
+# 14. Demo Comparison
+
+UI me toggle:
+
+```text
+NORMAL MODE
+CONTINUUM MODE
+```
+
+Same application.
+
+### Normal Mode
+
+Network = 20 kbps
+
+```text
+Submitting...
+↓
+Timeout
+↓
+Submission Failed
+```
+
+### Continuum Mode
+
+```text
+Network limited
+
+Generating MVT...
+
+7 KB core transaction found
+
+Sending...
+
+✓ Core transaction acknowledged
+
+4 documents deferred
+```
+
+Then network set:
+
+```text
+FAST
+```
+
+Automatic:
+
+```text
+Resuming uploads...
+
+1/4
+2/4
+3/4
+4/4
+
+✓ Application fully complete
+```
+
+Ye main demo moment hoga.
+
+---
+
+# 15. User Status UI
+
+Normal:
+
+> Network Error
+
+Continuum:
+
+```text
+Application Status
+
+✓ Saved on device
+✓ Core application registered
+
+○ Photo waiting
+○ ID Proof waiting
+○ Bank Proof waiting
+
+You may safely close this page.
+Uploads will resume when connectivity improves.
+```
+
+This is much better UX.
+
+---
+
+# 16. Proposed Tech Stack
+
+Practical and fast:
+
+### Frontend
+**Next.js + TypeScript**
+
+### UI
+**Tailwind CSS**
+
+### Backend
+**FastAPI**
+
+Reason:
+Python me later graph/optimization easier hoga.
+
+### Database
+Initially:
+**SQLite**
+
+Later:
+**PostgreSQL**
+
+### Browser Offline Storage
+**IndexedDB**
+
+### API
+REST
+
+### Testing
+- Vitest/Jest frontend
+- Pytest backend
+
+---
+
+# 17. Backend APIs
+
+Initial API design:
+
+```text
+POST /api/applications
+POST /api/intents
+POST /api/intents/{id}/mvt
+GET  /api/intents/{id}
+POST /api/intents/{id}/attachments
+POST /api/intents/{id}/complete
+```
+
+Network testing:
+
+```text
+GET /api/network/ping
+```
+
+Developer simulator:
+
+```text
+POST /api/simulator/config
+```
+
+---
+
+# 18. Basic Database Tables
+
+## users
+
+```text
+id
+name
+phone
+created_at
+```
+
+## applications
+
+```text
+id
+user_id
+scheme_id
+status
+created_at
+```
+
+## intents
+
+```text
+id
+application_id
+state
+payload_hash
+server_ack
+created_at
+updated_at
+```
+
+## attachments
+
+```text
+id
+intent_id
+type
+file_path
+size
+status
+```
+
+## sync_operations
+
+```text
+id
+intent_id
+operation
+priority
+status
+retry_count
+```
+
+---
+
+# 19. Architecture
+
+```text
+                USER
+                 │
+                 ▼
+        Citizen Service UI
+                 │
+                 ▼
+        Continuum Client SDK
+        ┌────────┼─────────┐
+        ▼        ▼         ▼
+   Local DB   Workflow   Network
+             Engine      Engine
+        │        │         │
+        └────────┼─────────┘
+                 ▼
+             MVT Engine
+                 │
+                 ▼
+            Intent Queue
+                 │
+             weak internet
+                 │
+                 ▼
+            Backend API
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+   Intent Ledger       Storage
+        │
+        ▼
+Progressive Completion
+```
+
+---
+
+# 20. MVP Scope
+
+Version 1 me hum deliberately ye nahi banaenge:
+
+- AI based automatic workflow generation
+- Android native app
+- real government API
+- actual Aadhaar integration
+- UPI/payment
+- peer-to-peer networking
+- mesh networking
+- ML bandwidth prediction
+
+Ye later.
+
+First target:
+
+> **Prove MVT + intent preservation + progressive completion.**
+
+---
+
+# 21. Build Phases
+
+## Phase 1 — Demo Service
+
+Build:
+
+- Next.js frontend
+- FastAPI backend
+- form flow
+- document upload
+- SQLite DB
+
+Target:
+
+Normal application fully works.
+
+---
+
+## Phase 2 — Offline Storage
+
+Add:
+
+- IndexedDB
+- save form locally
+- local transaction ID
+- connectivity detection
+
+Target:
+
+Browser refresh/network loss se form lose na ho.
+
+---
+
+## Phase 3 — Continuum Core
+
+Build:
+
+- workflow definition
+- required/deferred field classification
+- MVT generation
+- MVT endpoint
+
+Target:
+
+Full transaction se core payload extract ho.
+
+---
+
+## Phase 4 — Intent Ledger
+
+Add:
+
+- unique intent IDs
+- server acknowledgement
+- transaction states
+- duplicate submission protection
+
+Target:
+
+Repeated submit safe ho.
+
+---
+
+## Phase 5 — Progressive Completion
+
+Build:
+
+- attachment queue
+- retry engine
+- reconnect detection
+- background upload
+
+Target:
+
+Network recover → pending files automatically finish.
+
+---
+
+## Phase 6 — Network Simulator
+
+Build:
+
+```text
+GOOD
+LIMITED
+INTERMITTENT
+OFFLINE
+```
+
+Target:
+
+Demo controlled and repeatable ho.
+
+---
+
+## Phase 7 — Continuum Dashboard
+
+Show:
+
+```text
+Network
+20 kbps
+
+Workflow
+Benefit Application
+
+Full Payload
+3.4 MB
+
+MVT
+7 KB
+
+Saved
+✓
+
+Server Ack
+✓
+
+Pending
+4 files
+```
+
+---
+
+# 22. MVP Success Scenario
+
+Final demo exactly:
+
+### Step 1
+Set network:
+
+**20 kbps / intermittent**
+
+### Step 2
+Fill benefit application.
+
+### Step 3
+Upload 3–4 files.
+
+### Step 4
+Click submit.
+
+Conventional:
+
+> ❌ Submission Failed
+
+### Step 5
+Switch Continuum.
+
+Submit again.
+
+```text
+Analyzing workflow...
+↓
+MVT identified
+↓
+Core payload 7 KB
+↓
+Sending
+↓
+✓ Intent acknowledged
+```
+
+### Step 6
+
+Status:
+
+```text
+Core Complete
+4 files pending
+```
+
+### Step 7
+
+Set network:
+
+**Fast**
+
+Then:
+
+```text
+Auto sync started
+
+Photo ✓
+ID ✓
+Bank ✓
+PDF ✓
+
+FULLY COMPLETE
+```
+
+That's the complete story.
+
+---
+
+# 23. Later Version — Real Algorithm
+
+After MVP works, MVT ko graph model me move karenge.
+
+Workflow:
+
+\[
+G=(V,E)
+\]
+
+Each node:
+
+```text
+size
+required
+dependency
+atomicity
+priority
+```
+
+Connectivity budget:
+
+\[
+B
+\]
+
+Find subset:
+
+\[
+S \subseteq V
+\]
+
+such that:
+
+\[
+\sum size(S) \le B
+\]
+
+and dependency constraints satisfied hon.
+
+Goal:
+
+> smallest dependency-complete safe checkpoint.
+
+Ye project ka strongest CS/research component banega.
+
+---
+
+# 24. Product Vision
+
+Eventually:
+
+```text
+Any Essential App
+       │
+       ▼
+Continuum SDK
+       │
+       ▼
+Workflow Contract
+       │
+       ▼
+MVT Runtime
+       │
+       ▼
+Reliable Service
+```
+
+So developer:
+
+```ts
+continuum.defineWorkflow({
+  name: "benefit-application",
+  required: ["identity", "eligibility"],
+  deferred: ["photo", "documents"]
+})
+```
+
+aur Continuum resilience handle kare.
+
+---
+
+# Ab immediate next task
+
+Ab architecture decide ho gaya.
+
+**Next hume UI banana nahi hai immediately.**
+
+Pehle ek important artifact banaenge:
+
+## `continuum-spec.md`
+
+Isme:
+- product requirements
+- workflow states
+- database schema
+- API contracts
+- MVT rules
+- edge cases
+- acceptance tests
+
+lock karenge.
+
+Uske baad coding start karenge, otherwise development ke beech architecture change hoti rahegi.
+
+**Next message me main Continuum ka proper engineering specification (`continuum-spec.md`) ready kar sakta hoon**, jise tum directly GitHub repo me add kar sakte ho.
