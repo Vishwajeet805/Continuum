@@ -1,5 +1,3 @@
-Done. Ab **Continuum ko actual product ki tarah build karna** start karte hain. Main pehle **PRD + architecture + phased build roadmap** lock kar raha hoon.
-
 # Continuum — Product Requirements Document v1
 
 ## 1. Product Goal
